@@ -44,6 +44,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('deals/{deal}/activities', [ActivityLogController::class, 'index']);
     Route::post('deals/{deal}/activities', [ActivityLogController::class, 'store']);
     
+    // Manual activity logging & reports
+    Route::post('activity-logs', [ActivityLogController::class, 'storeManual']);
+    Route::get('reports', [ActivityLogController::class, 'reports']);
+    
     // Commissions
     Route::get('commissions', [CommissionController::class, 'index']);
     Route::get('commissions/summary', [CommissionController::class, 'summary']);

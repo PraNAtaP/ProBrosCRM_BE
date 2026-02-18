@@ -10,18 +10,12 @@ class ActivityLog extends Model
 {
     use HasFactory;
 
-    /**
-     * Activity type constants
-     */
     public const TYPE_CALL = 'call';
     public const TYPE_EMAIL = 'email';
     public const TYPE_MEETING = 'meeting';
     public const TYPE_STATUS_CHANGE = 'status_change';
     public const TYPE_NOTE = 'note';
 
-    /**
-     * All possible activity types
-     */
     public const TYPES = [
         self::TYPE_CALL,
         self::TYPE_EMAIL,
@@ -30,31 +24,54 @@ class ActivityLog extends Model
         self::TYPE_NOTE,
     ];
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var array<int, string>
-     */
+    public const MANUAL_TYPES = [
+        self::TYPE_CALL,
+        self::TYPE_MEETING,
+        self::TYPE_EMAIL,
+    ];
+
+    public const MEETING_TYPE_ONLINE = 'Online';
+    public const MEETING_TYPE_OFFLINE = 'Offline';
+
+    public const MEETING_TYPES = [
+        self::MEETING_TYPE_ONLINE,
+        self::MEETING_TYPE_OFFLINE,
+    ];
+
     protected $fillable = [
         'deal_id',
+        'contact_id',
+        'company_id',
         'user_id',
         'activity_type',
+        'meeting_type',
+        'start_time',
+        'duration',
         'notes',
     ];
 
-    /**
-     * Get the deal that owns the activity log.
-     */
+    protected $casts = [
+        'start_time' => 'datetime',
+        'duration' => 'integer',
+    ];
+
     public function deal(): BelongsTo
     {
         return $this->belongsTo(Deal::class);
     }
 
-    /**
-     * Get the user that created the activity log.
-     */
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function contact(): BelongsTo
+    {
+        return $this->belongsTo(Contact::class);
+    }
+
+    public function company(): BelongsTo
+    {
+        return $this->belongsTo(Company::class);
     }
 }
