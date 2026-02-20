@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -14,27 +15,27 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        // Sanctum stateful domains (for SPA)
         $middleware->statefulApi();
         
-        // Admin middleware alias
         $middleware->alias([
             'admin' => \App\Http\Middleware\EnsureUserIsAdmin::class,
         ]);
-
-        // Return 401 JSON for unauthenticated API requests instead of
-        // trying to redirect to a "login" route that doesn't exist.
-        $middleware->redirectGuestsTo(function (Request $request) {
-            if ($request->is('api/*') || $request->expectsJson()) {
-                abort(response()->json(['message' => 'Unauthenticated.'], 401));
-            }
-            return '/login';
-        });
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        // Force detailed JSON errors on API routes
+        // Fix: unauthenticated API requests return 401 JSON, not redirect to login
+        $exceptions->render(function (AuthenticationException $e, Request $request) {
+            if ($request->is('api/*') || $request->expectsJson()) {
+                return response()->json(['message' => 'Unauthenticated.'], 401);
+            }
+        });
+
+        // Catch-all: log every exception + return detailed JSON for API routes
         $exceptions->render(function (\Throwable $e, Request $request) {
-            // Always log the error to stderr for Railway visibility
+            // Skip AuthenticationException (handled above)
+            if ($e instanceof AuthenticationException) {
+                return null;
+            }
+
             Log::error('Unhandled Exception', [
                 'url' => $request->fullUrl(),
                 'method' => $request->method(),
@@ -44,7 +45,6 @@ return Application::configure(basePath: dirname(__DIR__))
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            // Return detailed JSON on API requests when debug is on
             if ($request->is('api/*') || $request->expectsJson()) {
                 $status = method_exists($e, 'getStatusCode') ? $e->getStatusCode() : 500;
 
@@ -67,4 +67,3 @@ return Application::configure(basePath: dirname(__DIR__))
             }
         });
     })->create();
-
