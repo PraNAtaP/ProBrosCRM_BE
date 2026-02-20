@@ -21,6 +21,15 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'admin' => \App\Http\Middleware\EnsureUserIsAdmin::class,
         ]);
+
+        // Return 401 JSON for unauthenticated API requests instead of
+        // trying to redirect to a "login" route that doesn't exist.
+        $middleware->redirectGuestsTo(function (Request $request) {
+            if ($request->is('api/*') || $request->expectsJson()) {
+                abort(response()->json(['message' => 'Unauthenticated.'], 401));
+            }
+            return '/login';
+        });
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // Force detailed JSON errors on API routes
