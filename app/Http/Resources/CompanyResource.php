@@ -25,7 +25,7 @@ class CompanyResource extends JsonResource
             'address' => $this->address,
             'industry' => $this->industry,
             'phone' => $this->phone,
-            'contacts_count' => $this->whenLoaded('contacts', fn() => $this->contacts->count()),
+            'contacts_count' => $this->contacts_count ?? 0,
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
         ];

@@ -11,90 +11,108 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class ContactController extends Controller
 {
-    /**
-     * Display a listing of the resource.
-     */
-    public function index(Request $request): AnonymousResourceCollection
+    public function index(Request $request): AnonymousResourceCollection|JsonResponse
     {
-        $query = Contact::with('company');
+        try {
+            $query = Contact::with('company')->withCount('deals');
 
-        // Filter by company_id if provided
-        if ($request->has('company_id')) {
-            $query->where('company_id', $request->company_id);
+            if ($request->has('company_id')) {
+                $query->where('company_id', $request->company_id);
+            }
+
+            if ($request->has('search')) {
+                $search = $request->search;
+                $query->where(function ($q) use ($search) {
+                    $q->where('name', 'like', "%{$search}%")
+                      ->orWhere('email', 'like', "%{$search}%");
+                });
+            }
+
+            $contacts = $query->orderBy('name')->get();
+            return ContactResource::collection($contacts);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'Failed to load contacts.',
+                'error' => config('app.debug') ? $e->getMessage() : 'Server error',
+            ], 500);
         }
-
-        // Search by name or email
-        if ($request->has('search')) {
-            $search = $request->search;
-            $query->where(function ($q) use ($search) {
-                $q->where('name', 'like', "%{$search}%")
-                  ->orWhere('email', 'like', "%{$search}%");
-            });
-        }
-
-        $contacts = $query->orderBy('name')->get();
-        return ContactResource::collection($contacts);
     }
 
-    /**
-     * Store a newly created resource in storage.
-     */
     public function store(Request $request): JsonResponse
     {
-        $validated = $request->validate([
-            'company_id' => 'required|exists:companies,id',
-            'name' => 'required|string|max:255',
-            'email' => 'nullable|email|max:255',
-            'phone' => 'nullable|string|max:50',
-            'position' => 'nullable|string|max:255',
-        ]);
+        try {
+            $validated = $request->validate([
+                'company_id' => 'required|exists:companies,id',
+                'name' => 'required|string|max:255',
+                'email' => 'nullable|email|max:255',
+                'phone' => 'nullable|string|max:50',
+                'position' => 'nullable|string|max:255',
+            ]);
 
-        $contact = Contact::create($validated);
+            $contact = Contact::create($validated);
 
-        return response()->json([
-            'message' => 'Contact created successfully',
-            'data' => new ContactResource($contact->load('company')),
-        ], 201);
+            return response()->json([
+                'message' => 'Contact created successfully',
+                'data' => new ContactResource($contact->load('company')),
+            ], 201);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'Failed to create contact.',
+                'error' => config('app.debug') ? $e->getMessage() : 'Server error',
+            ], 500);
+        }
     }
 
-    /**
-     * Display the specified resource.
-     */
-    public function show(Contact $contact): ContactResource
+    public function show(Contact $contact): ContactResource|JsonResponse
     {
-        return new ContactResource($contact->load(['company', 'deals']));
+        try {
+            return new ContactResource($contact->load(['company', 'deals'])->loadCount('deals'));
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'Failed to load contact.',
+                'error' => config('app.debug') ? $e->getMessage() : 'Server error',
+            ], 500);
+        }
     }
 
-    /**
-     * Update the specified resource in storage.
-     */
     public function update(Request $request, Contact $contact): JsonResponse
     {
-        $validated = $request->validate([
-            'company_id' => 'sometimes|exists:companies,id',
-            'name' => 'sometimes|string|max:255',
-            'email' => 'nullable|email|max:255',
-            'phone' => 'nullable|string|max:50',
-            'position' => 'nullable|string|max:255',
-        ]);
+        try {
+            $validated = $request->validate([
+                'company_id' => 'sometimes|exists:companies,id',
+                'name' => 'sometimes|string|max:255',
+                'email' => 'nullable|email|max:255',
+                'phone' => 'nullable|string|max:50',
+                'position' => 'nullable|string|max:255',
+            ]);
 
-        $contact->update($validated);
+            $contact->update($validated);
 
-        return response()->json([
-            'message' => 'Contact updated successfully',
-            'data' => new ContactResource($contact->load('company')),
-        ]);
+            return response()->json([
+                'message' => 'Contact updated successfully',
+                'data' => new ContactResource($contact->load('company')),
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'Failed to update contact.',
+                'error' => config('app.debug') ? $e->getMessage() : 'Server error',
+            ], 500);
+        }
     }
 
-    /**
-     * Remove the specified resource from storage.
-     */
     public function destroy(Contact $contact): JsonResponse
     {
-        $contact->delete();
+        try {
+            $contact->delete();
 
-        return response()->json([
-            'message' => 'Contact deleted successfully',
-        ]);
+            return response()->json([
+                'message' => 'Contact deleted successfully',
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'Failed to delete contact.',
+                'error' => config('app.debug') ? $e->getMessage() : 'Server error',
+            ], 500);
+        }
     }
 }

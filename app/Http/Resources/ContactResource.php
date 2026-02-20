@@ -25,7 +25,7 @@ class ContactResource extends JsonResource
             'email' => $this->email,
             'phone' => $this->phone,
             'position' => $this->position,
-            'deals_count' => $this->whenLoaded('deals', fn() => $this->deals->count()),
+            'deals_count' => $this->deals_count ?? 0,
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
         ];

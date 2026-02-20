@@ -8,89 +8,123 @@ use App\Models\Company;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\Cache;
 
 class CompanyController extends Controller
 {
-    /**
-     * Display a listing of the resource.
-     */
-    public function index(Request $request): AnonymousResourceCollection
+    public function index(Request $request): AnonymousResourceCollection|JsonResponse
     {
-        $query = Company::with(['area', 'contacts']);
+        try {
+            $hasFilters = $request->has('area_id') || $request->has('search');
 
-        // Filter by area_id if provided
-        if ($request->has('area_id')) {
-            $query->where('area_id', $request->area_id);
+            if (!$hasFilters) {
+                $companies = Cache::remember('companies_list', 3600, function () {
+                    return Company::with('area')
+                        ->withCount('contacts')
+                        ->orderBy('name')
+                        ->get();
+                });
+                return CompanyResource::collection($companies);
+            }
+
+            $query = Company::with('area')->withCount('contacts');
+
+            if ($request->has('area_id')) {
+                $query->where('area_id', $request->area_id);
+            }
+
+            if ($request->has('search')) {
+                $query->where('name', 'like', '%' . $request->search . '%');
+            }
+
+            $companies = $query->orderBy('name')->get();
+            return CompanyResource::collection($companies);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'Failed to load companies.',
+                'error' => config('app.debug') ? $e->getMessage() : 'Server error',
+            ], 500);
         }
-
-        // Search by name
-        if ($request->has('search')) {
-            $query->where('name', 'like', '%' . $request->search . '%');
-        }
-
-        $companies = $query->orderBy('name')->get();
-        return CompanyResource::collection($companies);
     }
 
-    /**
-     * Store a newly created resource in storage.
-     */
     public function store(Request $request): JsonResponse
     {
-        $validated = $request->validate([
-            'area_id' => 'required|exists:areas,id',
-            'name' => 'required|string|max:255',
-            'address' => 'nullable|string',
-            'industry' => 'nullable|string|max:255',
-            'phone' => 'nullable|string|max:50',
-        ]);
+        try {
+            $validated = $request->validate([
+                'area_id' => 'required|exists:areas,id',
+                'name' => 'required|string|max:255',
+                'address' => 'nullable|string',
+                'industry' => 'nullable|string|max:255',
+                'phone' => 'nullable|string|max:50',
+            ]);
 
-        $company = Company::create($validated);
+            $company = Company::create($validated);
+            Cache::forget('companies_list');
 
-        return response()->json([
-            'message' => 'Company created successfully',
-            'data' => new CompanyResource($company->load('area')),
-        ], 201);
+            return response()->json([
+                'message' => 'Company created successfully',
+                'data' => new CompanyResource($company->load('area')),
+            ], 201);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'Failed to create company.',
+                'error' => config('app.debug') ? $e->getMessage() : 'Server error',
+            ], 500);
+        }
     }
 
-    /**
-     * Display the specified resource.
-     */
-    public function show(Company $company): CompanyResource
+    public function show(Company $company): CompanyResource|JsonResponse
     {
-        return new CompanyResource($company->load(['area', 'contacts']));
+        try {
+            return new CompanyResource($company->loadCount('contacts')->load('area'));
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'Failed to load company.',
+                'error' => config('app.debug') ? $e->getMessage() : 'Server error',
+            ], 500);
+        }
     }
 
-    /**
-     * Update the specified resource in storage.
-     */
     public function update(Request $request, Company $company): JsonResponse
     {
-        $validated = $request->validate([
-            'area_id' => 'sometimes|exists:areas,id',
-            'name' => 'sometimes|string|max:255',
-            'address' => 'nullable|string',
-            'industry' => 'nullable|string|max:255',
-            'phone' => 'nullable|string|max:50',
-        ]);
+        try {
+            $validated = $request->validate([
+                'area_id' => 'sometimes|exists:areas,id',
+                'name' => 'sometimes|string|max:255',
+                'address' => 'nullable|string',
+                'industry' => 'nullable|string|max:255',
+                'phone' => 'nullable|string|max:50',
+            ]);
 
-        $company->update($validated);
+            $company->update($validated);
+            Cache::forget('companies_list');
 
-        return response()->json([
-            'message' => 'Company updated successfully',
-            'data' => new CompanyResource($company->load('area')),
-        ]);
+            return response()->json([
+                'message' => 'Company updated successfully',
+                'data' => new CompanyResource($company->load('area')),
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'Failed to update company.',
+                'error' => config('app.debug') ? $e->getMessage() : 'Server error',
+            ], 500);
+        }
     }
 
-    /**
-     * Remove the specified resource from storage.
-     */
     public function destroy(Company $company): JsonResponse
     {
-        $company->delete();
+        try {
+            $company->delete();
+            Cache::forget('companies_list');
 
-        return response()->json([
-            'message' => 'Company deleted successfully',
-        ]);
+            return response()->json([
+                'message' => 'Company deleted successfully',
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'Failed to delete company.',
+                'error' => config('app.debug') ? $e->getMessage() : 'Server error',
+            ], 500);
+        }
     }
 }
