@@ -3,6 +3,8 @@
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -21,5 +23,39 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        // Force detailed JSON errors on API routes
+        $exceptions->render(function (\Throwable $e, Request $request) {
+            // Always log the error to stderr for Railway visibility
+            Log::error('Unhandled Exception', [
+                'url' => $request->fullUrl(),
+                'method' => $request->method(),
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            // Return detailed JSON on API requests when debug is on
+            if ($request->is('api/*') || $request->expectsJson()) {
+                $status = method_exists($e, 'getStatusCode') ? $e->getStatusCode() : 500;
+
+                $response = [
+                    'message' => $e->getMessage() ?: 'Server Error',
+                    'status' => $status,
+                ];
+
+                if (config('app.debug')) {
+                    $response['file'] = $e->getFile();
+                    $response['line'] = $e->getLine();
+                    $response['trace'] = collect($e->getTrace())->take(10)->map(fn($t) => [
+                        'file' => $t['file'] ?? null,
+                        'line' => $t['line'] ?? null,
+                        'function' => ($t['class'] ?? '') . ($t['type'] ?? '') . ($t['function'] ?? ''),
+                    ])->toArray();
+                }
+
+                return response()->json($response, $status);
+            }
+        });
     })->create();
+
