@@ -8,6 +8,7 @@ use App\Models\Deal;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\Log;
 
 class DealController extends Controller
 {
@@ -40,6 +41,11 @@ class DealController extends Controller
             $deals = $query->orderBy('created_at', 'desc')->get();
             return DealResource::collection($deals);
         } catch (\Throwable $e) {
+            Log::error('DealController@index failed', [
+                'user_id' => $request->user()?->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
             return response()->json([
                 'message' => 'Failed to load deals.',
                 'error' => config('app.debug') ? $e->getMessage() : 'Server error',
@@ -60,6 +66,10 @@ class DealController extends Controller
 
             return new DealResource($deal->load(['contact.company', 'user', 'commission', 'activityLogs.user']));
         } catch (\Throwable $e) {
+            Log::error('DealController@show failed', [
+                'deal_id' => $deal->id ?? null,
+                'error' => $e->getMessage(),
+            ]);
             return response()->json([
                 'message' => 'Failed to load deal.',
                 'error' => config('app.debug') ? $e->getMessage() : 'Server error',
@@ -91,6 +101,10 @@ class DealController extends Controller
                 'data' => new DealResource($deal->load(['contact.company', 'user'])),
             ], 201);
         } catch (\Throwable $e) {
+            Log::error('DealController@store failed', [
+                'user_id' => $request->user()?->id,
+                'error' => $e->getMessage(),
+            ]);
             return response()->json([
                 'message' => 'Failed to create deal.',
                 'error' => config('app.debug') ? $e->getMessage() : 'Server error',
@@ -124,6 +138,10 @@ class DealController extends Controller
                 'data' => new DealResource($deal->load(['contact.company', 'user', 'commission'])),
             ]);
         } catch (\Throwable $e) {
+            Log::error('DealController@update failed', [
+                'deal_id' => $deal->id ?? null,
+                'error' => $e->getMessage(),
+            ]);
             return response()->json([
                 'message' => 'Failed to update deal.',
                 'error' => config('app.debug') ? $e->getMessage() : 'Server error',
@@ -148,6 +166,10 @@ class DealController extends Controller
                 'message' => 'Deal deleted successfully',
             ]);
         } catch (\Throwable $e) {
+            Log::error('DealController@destroy failed', [
+                'deal_id' => $deal->id ?? null,
+                'error' => $e->getMessage(),
+            ]);
             return response()->json([
                 'message' => 'Failed to delete deal.',
                 'error' => config('app.debug') ? $e->getMessage() : 'Server error',
