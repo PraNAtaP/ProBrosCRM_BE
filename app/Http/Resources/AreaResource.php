@@ -18,7 +18,7 @@ class AreaResource extends JsonResource
             'id' => $this->id,
             'name' => $this->name,
             'description' => $this->description,
-            'companies_count' => $this->whenLoaded('companies', fn() => $this->companies->count()),
+            'companies_count' => $this->companies_count ?? 0,
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
         ];

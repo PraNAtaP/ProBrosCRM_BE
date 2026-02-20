@@ -16,7 +16,7 @@ class AreaController extends Controller
      */
     public function index(): AnonymousResourceCollection
     {
-        $areas = Area::with('companies')->orderBy('name')->get();
+        $areas = Area::withCount('companies')->orderBy('name')->get();
         return AreaResource::collection($areas);
     }
 
@@ -43,7 +43,7 @@ class AreaController extends Controller
      */
     public function show(Area $area): AreaResource
     {
-        return new AreaResource($area->load('companies'));
+        return new AreaResource($area->loadCount('companies'));
     }
 
     /**
@@ -69,6 +69,14 @@ class AreaController extends Controller
      */
     public function destroy(Area $area): JsonResponse
     {
+        $companiesCount = $area->companies()->count();
+
+        if ($companiesCount > 0) {
+            return response()->json([
+                'message' => "Cannot delete \"{$area->name}\" because it is still used by {$companiesCount} compan" . ($companiesCount !== 1 ? 'ies' : 'y') . ". Please reassign those companies first.",
+            ], 409);
+        }
+
         $area->delete();
 
         return response()->json([
