@@ -4,24 +4,31 @@ namespace App\Providers;
 
 use App\Models\Deal;
 use App\Observers\DealObserver;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
 {
-    /**
-     * Register any application services.
-     */
     public function register(): void
     {
         //
     }
 
-    /**
-     * Bootstrap any application services.
-     */
     public function boot(): void
     {
-        // Register the Deal observer
         Deal::observe(DealObserver::class);
+
+        // Database health check — log connection failures clearly
+        try {
+            DB::connection()->getPdo();
+        } catch (\Throwable $e) {
+            Log::critical('DATABASE CONNECTION FAILED', [
+                'driver' => config('database.default'),
+                'host' => config('database.connections.' . config('database.default') . '.host'),
+                'database' => config('database.connections.' . config('database.default') . '.database'),
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 }
