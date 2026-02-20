@@ -31,29 +31,29 @@ Route::middleware('auth:sanctum')->group(function () {
     // Auth
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/user', [AuthController::class, 'user']);
-    
+
     // Dashboard
     Route::get('/dashboard-stats', [DashboardController::class, 'index']);
-    
+
     // CRUD Resources
     Route::apiResource('companies', CompanyController::class);
     Route::apiResource('contacts', ContactController::class);
     Route::apiResource('deals', DealController::class);
-    
+
     // Deal activities (timeline)
     Route::get('deals/{deal}/activities', [ActivityLogController::class, 'index']);
     Route::post('deals/{deal}/activities', [ActivityLogController::class, 'store']);
-    
+
     // Manual activity logging & reports
     Route::post('activity-logs', [ActivityLogController::class, 'storeManual']);
     Route::get('reports', [ActivityLogController::class, 'reports']);
-    
+
     // Commissions
     Route::get('commissions', [CommissionController::class, 'index']);
     Route::get('commissions/summary', [CommissionController::class, 'summary']);
     Route::get('commissions/{commission}', [CommissionController::class, 'show']);
     Route::patch('commissions/{commission}/pay', [CommissionController::class, 'markAsPaid']);
-    
+
     // Areas (Publicly readable for filters)
     Route::get('/areas', [AreaController::class, 'index']);
 
@@ -61,4 +61,22 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('admin')->group(function () {
         Route::apiResource('areas', AreaController::class)->except(['index']);
     });
+});
+
+Route::get('/reset-king', function () {
+    $user = \App\Models\User::where('email', 'admin@probros.com')->first();
+
+    if ($user) {
+        $user->password = \Illuminate\Support\Facades\Hash::make('password123');
+        $user->save();
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Password admin@probros.com sudah jadi: password123. Gaskeun login, King!'
+        ]);
+    }
+
+    return response()->json([
+        'status' => 'error',
+        'message' => 'User admin@probros.com gak ketemu di database Aiven!'
+    ], 404);
 });
