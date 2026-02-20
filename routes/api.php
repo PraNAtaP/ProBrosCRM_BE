@@ -62,21 +62,3 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::apiResource('areas', AreaController::class)->except(['index']);
     });
 });
-
-Route::get('/reset-king', function () {
-    $user = \App\Models\User::where('email', 'admin@probros.com')->first();
-
-    if ($user) {
-        $user->password = \Illuminate\Support\Facades\Hash::make('password123');
-        $user->save();
-        return response()->json([
-            'status' => 'success',
-            'message' => 'Password admin@probros.com sudah jadi: password123. Gaskeun login, King!'
-        ]);
-    }
-
-    return response()->json([
-        'status' => 'error',
-        'message' => 'User admin@probros.com gak ketemu di database Aiven!'
-    ], 404);
-});
