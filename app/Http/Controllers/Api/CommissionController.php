@@ -38,8 +38,10 @@ class CommissionController extends Controller
                       ->whereYear('calculation_date', $request->year);
             }
 
-            $commissions = $query->orderBy('calculation_date', 'desc')->get();
-            return CommissionResource::collection($commissions);
+            $query->orderBy('calculation_date', 'desc');
+
+            $perPage = min((int) $request->input('per_page', 30), 100);
+            return CommissionResource::collection($query->simplePaginate($perPage));
         } catch (\Throwable $e) {
             return response()->json([
                 'message' => 'Failed to load commissions.',

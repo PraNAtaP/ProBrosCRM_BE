@@ -28,8 +28,10 @@ class ContactController extends Controller
                 });
             }
 
-            $contacts = $query->orderBy('name')->get();
-            return ContactResource::collection($contacts);
+            $query->orderBy('name');
+
+            $perPage = min((int) $request->input('per_page', 50), 100);
+            return ContactResource::collection($query->simplePaginate($perPage));
         } catch (\Throwable $e) {
             return response()->json([
                 'message' => 'Failed to load contacts.',

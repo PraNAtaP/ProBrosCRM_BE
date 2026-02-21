@@ -16,8 +16,9 @@ class DealController extends Controller
     {
         try {
             $user = $request->user();
+            // RAM: only select columns needed for table/kanban — no description
             $query = Deal::select([
-                    'id', 'contact_id', 'user_id', 'title', 'value', 'status', 'description', 'created_at', 'updated_at'
+                    'id', 'contact_id', 'user_id', 'title', 'value', 'status', 'created_at', 'updated_at'
                 ])
                 ->with([
                     'contact' => fn($q) => $q->select(['id', 'name', 'email', 'company_id']),
@@ -38,8 +39,16 @@ class DealController extends Controller
                 $query->where('user_id', $request->user_id);
             }
 
-            $deals = $query->orderBy('created_at', 'desc')->get();
-            return DealResource::collection($deals);
+            $query->orderBy('created_at', 'desc');
+
+            // Kanban needs all deals (no pagination) — use ?all=true
+            if ($request->boolean('all')) {
+                return DealResource::collection($query->get());
+            }
+
+            // RAM: simplePaginate doesn't COUNT(*) — saves ~50% memory vs paginate()
+            $perPage = min((int) $request->input('per_page', 50), 100);
+            return DealResource::collection($query->simplePaginate($perPage));
         } catch (\Throwable $e) {
             Log::error('DealController@index failed', [
                 'user_id' => $request->user()?->id,
