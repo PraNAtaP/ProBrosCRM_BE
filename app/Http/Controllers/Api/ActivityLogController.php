@@ -12,6 +12,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class ActivityLogController extends Controller
 {
@@ -33,6 +34,10 @@ class ActivityLogController extends Controller
 
             return ActivityLogResource::collection($activities);
         } catch (\Throwable $e) {
+            Log::error('ActivityLogController@index failed', [
+                'deal_id' => $deal->id ?? null,
+                'error' => $e->getMessage(),
+            ]);
             return response()->json([
                 'message' => 'Failed to load activities.',
                 'error' => config('app.debug') ? $e->getMessage() : 'Server error',
@@ -67,6 +72,10 @@ class ActivityLogController extends Controller
                 'data' => new ActivityLogResource($activity->load('user')),
             ], 201);
         } catch (\Throwable $e) {
+            Log::error('ActivityLogController@store failed', [
+                'deal_id' => $deal->id ?? null,
+                'error' => $e->getMessage(),
+            ]);
             return response()->json([
                 'message' => 'Failed to log activity.',
                 'error' => config('app.debug') ? $e->getMessage() : 'Server error',
@@ -94,12 +103,10 @@ class ActivityLogController extends Controller
             $contactId = $validated['contact_id'] ?? null;
             if ($contactId && !$companyId) {
                 $contact = Contact::select(['id', 'company_id'])->find($contactId);
-                if ($contact) {
-                    $companyId = $contact->company_id;
-                }
+                $companyId = $contact?->company_id;
             }
 
-            if ($validated['deal_id'] && $user->isSales()) {
+            if (!empty($validated['deal_id']) && $user->isSales()) {
                 $deal = Deal::select(['id', 'user_id'])->find($validated['deal_id']);
                 if ($deal && $deal->user_id !== $user->id) {
                     return response()->json([
@@ -125,6 +132,9 @@ class ActivityLogController extends Controller
                 'data' => new ActivityLogResource($activity->load(['user', 'deal', 'contact', 'company'])),
             ], 201);
         } catch (\Throwable $e) {
+            Log::error('ActivityLogController@storeManual failed', [
+                'error' => $e->getMessage(),
+            ]);
             return response()->json([
                 'message' => 'Failed to log activity.',
                 'error' => config('app.debug') ? $e->getMessage() : 'Server error',
@@ -138,6 +148,7 @@ class ActivityLogController extends Controller
             $user = $request->user();
             $period = $request->input('period', 'monthly');
 
+            // No cache — always fresh data
             $now = Carbon::now();
             switch ($period) {
                 case 'daily':
@@ -145,75 +156,58 @@ class ActivityLogController extends Controller
                     $endDate = $now->copy()->endOfDay();
                     $trendStart = $now->copy()->subDays(29)->startOfDay();
                     $groupFormat = '%Y-%m-%d';
-                    $carbonFormat = 'Y-m-d';
                     break;
                 case 'weekly':
                     $startDate = $now->copy()->startOfWeek();
                     $endDate = $now->copy()->endOfWeek();
                     $trendStart = $now->copy()->subWeeks(11)->startOfWeek();
                     $groupFormat = '%x-W%v';
-                    $carbonFormat = 'o-\\WW';
                     break;
-                default:
+                default: // monthly
                     $startDate = $now->copy()->startOfMonth();
                     $endDate = $now->copy()->endOfMonth();
                     $trendStart = $now->copy()->subMonths(11)->startOfMonth();
                     $groupFormat = '%Y-%m';
-                    $carbonFormat = 'Y-m';
                     break;
             }
 
+            $isSales = $user->isSales();
             $activityQuery = ActivityLog::query();
             $dealQuery = Deal::query();
 
-            if ($user->isSales()) {
+            if ($isSales) {
                 $activityQuery->where('user_id', $user->id);
                 $dealQuery->where('user_id', $user->id);
             }
 
+            // Activity counts for current period — inclusive of today
             $periodActivities = (clone $activityQuery)
                 ->whereBetween('created_at', [$startDate, $endDate])
                 ->whereIn('activity_type', ActivityLog::MANUAL_TYPES);
 
-            $totalCalls = (clone $periodActivities)->where('activity_type', 'call')->count();
-            $totalMeetings = (clone $periodActivities)->where('activity_type', 'meeting')->count();
-            $totalEmails = (clone $periodActivities)->where('activity_type', 'email')->count();
+            $totalCalls = (int) ((clone $periodActivities)->where('activity_type', 'call')->count());
+            $totalMeetings = (int) ((clone $periodActivities)->where('activity_type', 'meeting')->count());
+            $totalEmails = (int) ((clone $periodActivities)->where('activity_type', 'email')->count());
 
-            $newActiveCustomers = (clone $dealQuery)
+            $newActiveCustomers = (int) ((clone $dealQuery)
                 ->where('status', Deal::STATUS_ACTIVE_CUSTOMER)
                 ->whereBetween('updated_at', [$startDate, $endDate])
-                ->count();
+                ->count());
 
-            $revenueQuery = (clone $dealQuery)->whereIn('status', Deal::REVENUE_STATUSES);
-            $totalRevenue = (clone $revenueQuery)->sum('value');
-            $totalProfit = round((float) $totalRevenue * 0.15, 2);
+            $totalRevenue = (float) ((clone $dealQuery)
+                ->whereIn('status', Deal::REVENUE_STATUSES)
+                ->sum('value') ?? 0);
 
-            $trendData = (clone $activityQuery)
-                ->whereIn('activity_type', ActivityLog::MANUAL_TYPES)
-                ->where('created_at', '>=', $trendStart)
-                ->select(
-                    DB::raw("DATE_FORMAT(created_at, '{$groupFormat}') as period_label"),
-                    DB::raw("SUM(CASE WHEN activity_type = 'call' THEN 1 ELSE 0 END) as calls"),
-                    DB::raw("SUM(CASE WHEN activity_type = 'meeting' THEN 1 ELSE 0 END) as meetings"),
-                    DB::raw("SUM(CASE WHEN activity_type = 'email' THEN 1 ELSE 0 END) as emails"),
-                    DB::raw("COUNT(*) as total")
-                )
-                ->groupBy('period_label')
-                ->orderBy('period_label')
-                ->get();
+            $totalProfit = round($totalRevenue * 0.15, 2);
 
-            if ($trendData->isEmpty()) {
-                $sqliteGroupFormat = match ($period) {
-                    'daily' => '%Y-%m-%d',
-                    'weekly' => '%Y-W%W',
-                    default => '%Y-%m',
-                };
-
+            // Trend data
+            $trendData = collect();
+            try {
                 $trendData = (clone $activityQuery)
                     ->whereIn('activity_type', ActivityLog::MANUAL_TYPES)
                     ->where('created_at', '>=', $trendStart)
                     ->select(
-                        DB::raw("strftime('{$sqliteGroupFormat}', created_at) as period_label"),
+                        DB::raw("DATE_FORMAT(created_at, '{$groupFormat}') as period_label"),
                         DB::raw("SUM(CASE WHEN activity_type = 'call' THEN 1 ELSE 0 END) as calls"),
                         DB::raw("SUM(CASE WHEN activity_type = 'meeting' THEN 1 ELSE 0 END) as meetings"),
                         DB::raw("SUM(CASE WHEN activity_type = 'email' THEN 1 ELSE 0 END) as emails"),
@@ -222,8 +216,12 @@ class ActivityLogController extends Controller
                     ->groupBy('period_label')
                     ->orderBy('period_label')
                     ->get();
+            } catch (\Throwable $e) {
+                Log::warning('Reports trend query failed', ['error' => $e->getMessage()]);
+                $trendData = collect();
             }
 
+            // Recent activities — null-safe
             $recentActivities = (clone $activityQuery)
                 ->with([
                     'user' => fn($q) => $q->select(['id', 'name']),
@@ -245,13 +243,19 @@ class ActivityLogController extends Controller
                     'total_meetings' => $totalMeetings,
                     'total_emails' => $totalEmails,
                     'new_active_customers' => $newActiveCustomers,
-                    'total_revenue' => (float) $totalRevenue,
+                    'total_revenue' => $totalRevenue,
                     'total_profit' => $totalProfit,
                 ],
                 'trend' => $trendData,
                 'recent_activities' => ActivityLogResource::collection($recentActivities),
             ]);
         } catch (\Throwable $e) {
+            Log::error('ActivityLogController@reports failed', [
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+            ]);
             return response()->json([
                 'message' => 'Failed to load reports.',
                 'error' => config('app.debug') ? $e->getMessage() : 'Server error',

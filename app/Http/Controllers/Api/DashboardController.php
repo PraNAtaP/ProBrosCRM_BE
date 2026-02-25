@@ -17,72 +17,70 @@ class DashboardController extends Controller
     {
         try {
             $user = $request->user();
+            $isSales = $user->isSales();
             $currentMonth = now()->month;
             $currentYear = now()->year;
-            $isSales = $user->isSales();
 
-            // RAM: use raw aggregation instead of loading models
+            // Deal aggregates — single GROUP BY query
             $dealBase = Deal::query();
             if ($isSales) {
                 $dealBase->where('user_id', $user->id);
             }
 
-            // Single query: counts + sums per status
             $stageStats = (clone $dealBase)
-                ->select('status', DB::raw('COUNT(*) as cnt'), DB::raw('SUM(value) as total'))
+                ->select('status', DB::raw('COUNT(*) as cnt'), DB::raw('COALESCE(SUM(value), 0) as total'))
                 ->groupBy('status')
-                ->pluck(null, 'status');
+                ->get()
+                ->keyBy('status');
 
             $dealsPerStage = [];
             foreach (Deal::STATUSES as $status) {
-                $row = $stageStats[$status] ?? null;
+                $row = $stageStats->get($status);
                 $dealsPerStage[$status] = [
-                    'count' => (int) ($row->cnt ?? 0),
+                    'count' => (int) ($row?->cnt ?? 0),
                     'label' => ucwords(str_replace('_', ' ', $status)),
-                    'color' => Deal::STATUS_COLORS[$status],
+                    'color' => Deal::STATUS_COLORS[$status] ?? '#64748b',
                 ];
             }
 
             $totalWonValue = collect(Deal::REVENUE_STATUSES)
-                ->sum(fn($s) => (float) ($stageStats[$s]->total ?? 0));
+                ->sum(fn($s) => (float) ($stageStats->get($s)?->total ?? 0));
 
             $totalActiveDeals = collect(Deal::STATUSES)
                 ->reject(fn($s) => $s === Deal::STATUS_LOST_CUSTOMER)
-                ->sum(fn($s) => (int) ($stageStats[$s]->cnt ?? 0));
+                ->sum(fn($s) => (int) ($stageStats->get($s)?->cnt ?? 0));
 
-            unset($stageStats); // free RAM
+            unset($stageStats);
 
-            // Commission aggregates — single query
+            // Commission aggregates
             $commBase = Commission::query();
             if ($isSales) {
                 $commBase->whereHas('deal', fn($q) => $q->where('user_id', $user->id));
             }
 
-            $monthlyCommission = (clone $commBase)
+            $monthlyCommission = (float) ((clone $commBase)
                 ->whereMonth('calculation_date', $currentMonth)
                 ->whereYear('calculation_date', $currentYear)
-                ->sum('amount');
+                ->sum('amount') ?? 0);
 
             $commSums = (clone $commBase)
-                ->select('status', DB::raw('SUM(amount) as total'))
+                ->select('status', DB::raw('COALESCE(SUM(amount), 0) as total'))
                 ->groupBy('status')
                 ->pluck('total', 'status');
 
             $totalPaidCommission = (float) ($commSums[Commission::STATUS_PAID] ?? 0);
             $totalPendingCommission = (float) ($commSums[Commission::STATUS_PENDING] ?? 0);
 
-            unset($commSums, $commBase); // free RAM
+            unset($commSums, $commBase);
 
-            $totalSalesRevenue = (float) $totalWonValue;
-
-            // Recent activities — lean select, limit 10
+            // Recent activities — null-safe mapping
             $activityQuery = ActivityLog::select(['id', 'deal_id', 'user_id', 'activity_type', 'notes', 'created_at'])
                 ->with([
                     'deal' => fn($q) => $q->select(['id', 'title']),
                     'user' => fn($q) => $q->select(['id', 'name']),
                 ]);
             if ($isSales) {
-                $activityQuery->whereHas('deal', fn($q) => $q->where('user_id', $user->id));
+                $activityQuery->where('user_id', $user->id);
             }
 
             $recentActivities = $activityQuery
@@ -92,33 +90,30 @@ class DashboardController extends Controller
                 ->map(fn($a) => [
                     'id' => $a->id,
                     'type' => $a->activity_type,
-                    'notes' => $a->notes,
-                    'deal_title' => $a->deal->title ?? null,
-                    'user_name' => $a->user->name ?? null,
-                    'created_at' => $a->created_at->toIso8601String(),
+                    'notes' => $a->notes ?? '',
+                    'deal_title' => $a->deal?->title ?? null,
+                    'user_name' => $a->user?->name ?? null,
+                    'created_at' => $a->created_at?->toIso8601String() ?? now()->toIso8601String(),
                 ]);
 
-            $response = response()->json([
+            return response()->json([
                 'deals_per_stage' => $dealsPerStage,
                 'total_won_value' => (float) $totalWonValue,
-                'monthly_commission' => (float) $monthlyCommission,
+                'monthly_commission' => $monthlyCommission,
                 'total_paid_commission' => $totalPaidCommission,
                 'total_pending_commission' => $totalPendingCommission,
-                'total_sales_revenue' => $totalSalesRevenue,
-                'total_active_deals' => $totalActiveDeals,
+                'total_sales_revenue' => (float) $totalWonValue,
+                'total_active_deals' => (int) $totalActiveDeals,
                 'recent_activities' => $recentActivities,
                 'month' => $currentMonth,
                 'year' => $currentYear,
             ]);
-
-            // Free RAM before response is sent
-            unset($dealsPerStage, $recentActivities);
-
-            return $response;
         } catch (\Throwable $e) {
             Log::error('DashboardController@index failed', [
                 'user_id' => $request->user()?->id,
                 'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
                 'trace' => $e->getTraceAsString(),
             ]);
             return response()->json([

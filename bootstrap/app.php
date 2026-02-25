@@ -15,18 +15,18 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        $middleware->statefulApi();
+        // Note: NOT using statefulApi() because this SPA uses Bearer token auth,
+        // not cookie-based session auth. statefulApi() adds CSRF which we don't need.
         
         $middleware->alias([
             'admin' => \App\Http\Middleware\EnsureUserIsAdmin::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        // Fix: unauthenticated API requests return 401 JSON, not redirect to login
+        // Fix: unauthenticated requests ALWAYS return 401 JSON
+        // This is a pure API backend — there is no web login page to redirect to
         $exceptions->render(function (AuthenticationException $e, Request $request) {
-            if ($request->is('api/*') || $request->expectsJson()) {
-                return response()->json(['message' => 'Unauthenticated.'], 401);
-            }
+            return response()->json(['message' => 'Unauthenticated.'], 401);
         });
 
         // Catch-all: log every exception + return detailed JSON for API routes

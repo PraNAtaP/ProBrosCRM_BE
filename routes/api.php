@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\CompanyController;
 use App\Http\Controllers\Api\ContactController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\DealController;
+use App\Http\Controllers\Api\SalesOrderController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -53,6 +54,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('commissions/summary', [CommissionController::class, 'summary']);
     Route::get('commissions/{commission}', [CommissionController::class, 'show']);
     Route::patch('commissions/{commission}/pay', [CommissionController::class, 'markAsPaid']);
+
+    // Sales Orders
+    Route::patch('sales-orders/mass/status', [SalesOrderController::class, 'massStatus']);
+    Route::patch('sales-orders/{salesOrder}/favorite', [SalesOrderController::class, 'toggleFavorite']);
+    Route::apiResource('sales-orders', SalesOrderController::class);
 
     // Areas (Publicly readable for filters)
     Route::get('/areas', [AreaController::class, 'index']);

@@ -8,6 +8,7 @@ use App\Models\Deal;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class DealController extends Controller
@@ -16,7 +17,6 @@ class DealController extends Controller
     {
         try {
             $user = $request->user();
-            // RAM: only select columns needed for table/kanban — no description
             $query = Deal::select([
                     'id', 'contact_id', 'user_id', 'title', 'value', 'status', 'created_at', 'updated_at'
                 ])
@@ -39,14 +39,23 @@ class DealController extends Controller
                 $query->where('user_id', $request->user_id);
             }
 
+            // Filter by contact or company (for Activity Logger dropdown)
+            if ($request->has('contact_id')) {
+                $query->where('contact_id', $request->contact_id);
+            }
+
+            if ($request->has('company_id')) {
+                $contactIds = \App\Models\Contact::where('company_id', $request->company_id)
+                    ->pluck('id');
+                $query->whereIn('contact_id', $contactIds);
+            }
+
             $query->orderBy('created_at', 'desc');
 
-            // Kanban needs all deals (no pagination) — use ?all=true
             if ($request->boolean('all')) {
                 return DealResource::collection($query->get());
             }
 
-            // RAM: simplePaginate doesn't COUNT(*) — saves ~50% memory vs paginate()
             $perPage = min((int) $request->input('per_page', 50), 100);
             return DealResource::collection($query->simplePaginate($perPage));
         } catch (\Throwable $e) {
@@ -68,9 +77,7 @@ class DealController extends Controller
             $user = $request->user();
 
             if ($user->isSales() && $deal->user_id !== $user->id) {
-                return response()->json([
-                    'message' => 'Unauthorized to view this deal',
-                ], 403);
+                return response()->json(['message' => 'Unauthorized to view this deal'], 403);
             }
 
             return new DealResource($deal->load(['contact.company', 'user', 'commission', 'activityLogs.user']));
@@ -103,7 +110,9 @@ class DealController extends Controller
                 $validated['status'] = Deal::STATUS_LEAD;
             }
 
-            $deal = Deal::create($validated);
+            $deal = DB::transaction(function () use ($validated) {
+                return Deal::create($validated);
+            });
 
             return response()->json([
                 'message' => 'Deal created successfully',
@@ -127,9 +136,7 @@ class DealController extends Controller
             $user = $request->user();
 
             if ($user->isSales() && $deal->user_id !== $user->id) {
-                return response()->json([
-                    'message' => 'Unauthorized to update this deal',
-                ], 403);
+                return response()->json(['message' => 'Unauthorized to update this deal'], 403);
             }
 
             $validated = $request->validate([
@@ -140,11 +147,13 @@ class DealController extends Controller
                 'description' => 'nullable|string',
             ]);
 
-            $deal->update($validated);
+            DB::transaction(function () use ($deal, $validated) {
+                $deal->update($validated);
+            });
 
             return response()->json([
                 'message' => 'Deal updated successfully',
-                'data' => new DealResource($deal->load(['contact.company', 'user', 'commission'])),
+                'data' => new DealResource($deal->fresh()->load(['contact.company', 'user', 'commission'])),
             ]);
         } catch (\Throwable $e) {
             Log::error('DealController@update failed', [
@@ -164,16 +173,14 @@ class DealController extends Controller
             $user = $request->user();
 
             if ($user->isSales() && $deal->user_id !== $user->id) {
-                return response()->json([
-                    'message' => 'Unauthorized to delete this deal',
-                ], 403);
+                return response()->json(['message' => 'Unauthorized to delete this deal'], 403);
             }
 
-            $deal->delete();
+            DB::transaction(function () use ($deal) {
+                $deal->delete();
+            });
 
-            return response()->json([
-                'message' => 'Deal deleted successfully',
-            ]);
+            return response()->json(['message' => 'Deal deleted successfully']);
         } catch (\Throwable $e) {
             Log::error('DealController@destroy failed', [
                 'deal_id' => $deal->id ?? null,

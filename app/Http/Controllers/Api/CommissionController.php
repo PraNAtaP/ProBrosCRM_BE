@@ -9,6 +9,8 @@ use App\Models\Deal;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class CommissionController extends Controller
 {
@@ -24,9 +26,7 @@ class CommissionController extends Controller
             ]);
 
             if ($user->isSales()) {
-                $query->whereHas('deal', function ($q) use ($user) {
-                    $q->where('user_id', $user->id);
-                });
+                $query->whereHas('deal', fn($q) => $q->where('user_id', $user->id));
             }
 
             if ($request->has('status')) {
@@ -43,6 +43,10 @@ class CommissionController extends Controller
             $perPage = min((int) $request->input('per_page', 30), 100);
             return CommissionResource::collection($query->simplePaginate($perPage));
         } catch (\Throwable $e) {
+            Log::error('CommissionController@index failed', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
             return response()->json([
                 'message' => 'Failed to load commissions.',
                 'error' => config('app.debug') ? $e->getMessage() : 'Server error',
@@ -55,14 +59,18 @@ class CommissionController extends Controller
         try {
             $user = $request->user();
 
-            if ($user->isSales() && $commission->deal->user_id !== $user->id) {
-                return response()->json([
-                    'message' => 'Unauthorized to view this commission',
-                ], 403);
+            // Null-safe: load deal first, then check ownership
+            $commission->load('deal');
+            if ($user->isSales() && $commission->deal?->user_id !== $user->id) {
+                return response()->json(['message' => 'Unauthorized to view this commission'], 403);
             }
 
             return new CommissionResource($commission->load('deal.user', 'deal.contact.company'));
         } catch (\Throwable $e) {
+            Log::error('CommissionController@show failed', [
+                'commission_id' => $commission->id ?? null,
+                'error' => $e->getMessage(),
+            ]);
             return response()->json([
                 'message' => 'Failed to load commission.',
                 'error' => config('app.debug') ? $e->getMessage() : 'Server error',
@@ -76,18 +84,22 @@ class CommissionController extends Controller
             $user = $request->user();
 
             if (!$user->isAdmin()) {
-                return response()->json([
-                    'message' => 'Only admin can mark commissions as paid',
-                ], 403);
+                return response()->json(['message' => 'Only admin can mark commissions as paid'], 403);
             }
 
-            $commission->update(['status' => Commission::STATUS_PAID]);
+            DB::transaction(function () use ($commission) {
+                $commission->update(['status' => Commission::STATUS_PAID]);
+            });
 
             return response()->json([
                 'message' => 'Commission marked as paid',
-                'data' => new CommissionResource($commission->load('deal.user')),
+                'data' => new CommissionResource($commission->fresh()->load('deal.user')),
             ]);
         } catch (\Throwable $e) {
+            Log::error('CommissionController@markAsPaid failed', [
+                'commission_id' => $commission->id ?? null,
+                'error' => $e->getMessage(),
+            ]);
             return response()->json([
                 'message' => 'Failed to update commission.',
                 'error' => config('app.debug') ? $e->getMessage() : 'Server error',
@@ -105,31 +117,31 @@ class CommissionController extends Controller
             $query = Commission::query();
 
             if ($user->isSales()) {
-                $query->whereHas('deal', function ($q) use ($user) {
-                    $q->where('user_id', $user->id);
-                });
+                $query->whereHas('deal', fn($q) => $q->where('user_id', $user->id));
             }
 
-            $monthlyQuery = clone $query;
-            $monthlyTotal = $monthlyQuery
+            $monthlyTotal = (clone $query)
                 ->whereMonth('calculation_date', $currentMonth)
                 ->whereYear('calculation_date', $currentYear)
                 ->sum('amount');
 
-            $pendingQuery = clone $query;
-            $pendingTotal = $pendingQuery->where('status', Commission::STATUS_PENDING)->sum('amount');
-
-            $paidQuery = clone $query;
-            $paidTotal = $paidQuery->where('status', Commission::STATUS_PAID)->sum('amount');
+            // Single query for status totals
+            $statusSums = (clone $query)
+                ->select('status', DB::raw('SUM(amount) as total'))
+                ->groupBy('status')
+                ->pluck('total', 'status');
 
             return response()->json([
                 'monthly_total' => (float) $monthlyTotal,
-                'pending_total' => (float) $pendingTotal,
-                'paid_total' => (float) $paidTotal,
+                'pending_total' => (float) ($statusSums[Commission::STATUS_PENDING] ?? 0),
+                'paid_total' => (float) ($statusSums[Commission::STATUS_PAID] ?? 0),
                 'month' => $currentMonth,
                 'year' => $currentYear,
             ]);
         } catch (\Throwable $e) {
+            Log::error('CommissionController@summary failed', [
+                'error' => $e->getMessage(),
+            ]);
             return response()->json([
                 'message' => 'Failed to load commission summary.',
                 'error' => config('app.debug') ? $e->getMessage() : 'Server error',

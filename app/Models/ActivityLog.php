@@ -5,10 +5,11 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class ActivityLog extends Model
 {
-    use HasFactory;
+    use HasFactory, SoftDeletes;
 
     public const TYPE_CALL = 'call';
     public const TYPE_EMAIL = 'email';
@@ -53,6 +54,8 @@ class ActivityLog extends Model
     protected $casts = [
         'start_time' => 'datetime',
         'duration' => 'integer',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
     ];
 
     public function deal(): BelongsTo

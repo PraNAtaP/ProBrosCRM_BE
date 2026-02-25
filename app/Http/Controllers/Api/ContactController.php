@@ -8,13 +8,16 @@ use App\Models\Contact;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class ContactController extends Controller
 {
     public function index(Request $request): AnonymousResourceCollection|JsonResponse
     {
         try {
-            $query = Contact::with('company')->withCount('deals');
+            $query = Contact::with(['company' => fn($q) => $q->select(['id', 'name'])])
+                ->withCount('deals');
 
             if ($request->has('company_id')) {
                 $query->where('company_id', $request->company_id);
@@ -33,6 +36,10 @@ class ContactController extends Controller
             $perPage = min((int) $request->input('per_page', 50), 100);
             return ContactResource::collection($query->simplePaginate($perPage));
         } catch (\Throwable $e) {
+            Log::error('ContactController@index failed', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
             return response()->json([
                 'message' => 'Failed to load contacts.',
                 'error' => config('app.debug') ? $e->getMessage() : 'Server error',
@@ -46,18 +53,23 @@ class ContactController extends Controller
             $validated = $request->validate([
                 'company_id' => 'required|exists:companies,id',
                 'name' => 'required|string|max:255',
-                'email' => 'nullable|email|max:255',
+                'email' => 'required|email|max:255',
                 'phone' => 'nullable|string|max:50',
                 'position' => 'nullable|string|max:255',
             ]);
 
-            $contact = Contact::create($validated);
+            $contact = DB::transaction(function () use ($validated) {
+                return Contact::create($validated);
+            });
 
             return response()->json([
                 'message' => 'Contact created successfully',
                 'data' => new ContactResource($contact->load('company')),
             ], 201);
         } catch (\Throwable $e) {
+            Log::error('ContactController@store failed', [
+                'error' => $e->getMessage(),
+            ]);
             return response()->json([
                 'message' => 'Failed to create contact.',
                 'error' => config('app.debug') ? $e->getMessage() : 'Server error',
@@ -68,8 +80,12 @@ class ContactController extends Controller
     public function show(Contact $contact): ContactResource|JsonResponse
     {
         try {
-            return new ContactResource($contact->load(['company', 'deals'])->loadCount('deals'));
+            return new ContactResource($contact->load('company')->loadCount('deals'));
         } catch (\Throwable $e) {
+            Log::error('ContactController@show failed', [
+                'contact_id' => $contact->id ?? null,
+                'error' => $e->getMessage(),
+            ]);
             return response()->json([
                 'message' => 'Failed to load contact.',
                 'error' => config('app.debug') ? $e->getMessage() : 'Server error',
@@ -83,18 +99,24 @@ class ContactController extends Controller
             $validated = $request->validate([
                 'company_id' => 'sometimes|exists:companies,id',
                 'name' => 'sometimes|string|max:255',
-                'email' => 'nullable|email|max:255',
+                'email' => 'sometimes|email|max:255',
                 'phone' => 'nullable|string|max:50',
                 'position' => 'nullable|string|max:255',
             ]);
 
-            $contact->update($validated);
+            DB::transaction(function () use ($contact, $validated) {
+                $contact->update($validated);
+            });
 
             return response()->json([
                 'message' => 'Contact updated successfully',
-                'data' => new ContactResource($contact->load('company')),
+                'data' => new ContactResource($contact->fresh()->load('company')),
             ]);
         } catch (\Throwable $e) {
+            Log::error('ContactController@update failed', [
+                'contact_id' => $contact->id ?? null,
+                'error' => $e->getMessage(),
+            ]);
             return response()->json([
                 'message' => 'Failed to update contact.',
                 'error' => config('app.debug') ? $e->getMessage() : 'Server error',
@@ -105,12 +127,16 @@ class ContactController extends Controller
     public function destroy(Contact $contact): JsonResponse
     {
         try {
-            $contact->delete();
+            DB::transaction(function () use ($contact) {
+                $contact->delete();
+            });
 
-            return response()->json([
-                'message' => 'Contact deleted successfully',
-            ]);
+            return response()->json(['message' => 'Contact deleted successfully']);
         } catch (\Throwable $e) {
+            Log::error('ContactController@destroy failed', [
+                'contact_id' => $contact->id ?? null,
+                'error' => $e->getMessage(),
+            ]);
             return response()->json([
                 'message' => 'Failed to delete contact.',
                 'error' => config('app.debug') ? $e->getMessage() : 'Server error',

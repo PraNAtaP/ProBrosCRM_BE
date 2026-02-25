@@ -165,6 +165,9 @@ class DatabaseSeeder extends Seeder
         // Note: Commission for 'Q1 Bean Supply' will be auto-created by the DealObserver
         // since it's created with status = active_customer
 
+        // Seed Sales Orders
+        $this->call(SalesOrderSeeder::class);
+
         $this->command->info('Database seeded successfully!');
         $this->command->info('Admin login: admin@probros.com / password');
         $this->command->info('Sales login: rana@probros.com / password');

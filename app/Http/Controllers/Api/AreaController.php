@@ -9,6 +9,8 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class AreaController extends Controller
 {
@@ -20,6 +22,9 @@ class AreaController extends Controller
             });
             return AreaResource::collection($areas);
         } catch (\Throwable $e) {
+            Log::error('AreaController@index failed', [
+                'error' => $e->getMessage(),
+            ]);
             return response()->json([
                 'message' => 'Failed to load areas.',
                 'error' => config('app.debug') ? $e->getMessage() : 'Server error',
@@ -35,7 +40,10 @@ class AreaController extends Controller
                 'description' => 'nullable|string',
             ]);
 
-            $area = Area::create($validated);
+            $area = DB::transaction(function () use ($validated) {
+                return Area::create($validated);
+            });
+
             Cache::forget('areas_list');
 
             return response()->json([
@@ -43,6 +51,9 @@ class AreaController extends Controller
                 'data' => new AreaResource($area),
             ], 201);
         } catch (\Throwable $e) {
+            Log::error('AreaController@store failed', [
+                'error' => $e->getMessage(),
+            ]);
             return response()->json([
                 'message' => 'Failed to create area.',
                 'error' => config('app.debug') ? $e->getMessage() : 'Server error',
@@ -55,6 +66,10 @@ class AreaController extends Controller
         try {
             return new AreaResource($area->loadCount('companies'));
         } catch (\Throwable $e) {
+            Log::error('AreaController@show failed', [
+                'area_id' => $area->id ?? null,
+                'error' => $e->getMessage(),
+            ]);
             return response()->json([
                 'message' => 'Failed to load area.',
                 'error' => config('app.debug') ? $e->getMessage() : 'Server error',
@@ -70,14 +85,21 @@ class AreaController extends Controller
                 'description' => 'nullable|string',
             ]);
 
-            $area->update($validated);
+            DB::transaction(function () use ($area, $validated) {
+                $area->update($validated);
+            });
+
             Cache::forget('areas_list');
 
             return response()->json([
                 'message' => 'Area updated successfully',
-                'data' => new AreaResource($area),
+                'data' => new AreaResource($area->fresh()),
             ]);
         } catch (\Throwable $e) {
+            Log::error('AreaController@update failed', [
+                'area_id' => $area->id ?? null,
+                'error' => $e->getMessage(),
+            ]);
             return response()->json([
                 'message' => 'Failed to update area.',
                 'error' => config('app.debug') ? $e->getMessage() : 'Server error',
@@ -96,13 +118,18 @@ class AreaController extends Controller
                 ], 409);
             }
 
-            $area->delete();
+            DB::transaction(function () use ($area) {
+                $area->delete();
+            });
+
             Cache::forget('areas_list');
 
-            return response()->json([
-                'message' => 'Area deleted successfully',
-            ]);
+            return response()->json(['message' => 'Area deleted successfully']);
         } catch (\Throwable $e) {
+            Log::error('AreaController@destroy failed', [
+                'area_id' => $area->id ?? null,
+                'error' => $e->getMessage(),
+            ]);
             return response()->json([
                 'message' => 'Failed to delete area.',
                 'error' => config('app.debug') ? $e->getMessage() : 'Server error',

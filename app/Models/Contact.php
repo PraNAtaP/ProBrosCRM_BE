@@ -5,17 +5,14 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Contact extends Model
 {
-    use HasFactory;
+    use HasFactory, SoftDeletes;
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var array<int, string>
-     */
     protected $fillable = [
         'company_id',
         'name',
@@ -24,8 +21,13 @@ class Contact extends Model
         'position',
     ];
 
+    protected $casts = [
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
+    ];
+
     /**
-     * Get the company that owns the contact.
+     * Legacy one-to-one (backward compatibility).
      */
     public function company(): BelongsTo
     {
@@ -33,10 +35,21 @@ class Contact extends Model
     }
 
     /**
-     * Get the deals for the contact.
+     * Many-to-many: a contact can belong to multiple companies.
      */
+    public function companies(): BelongsToMany
+    {
+        return $this->belongsToMany(Company::class, 'contact_company')
+            ->withTimestamps();
+    }
+
     public function deals(): HasMany
     {
         return $this->hasMany(Deal::class);
+    }
+
+    public function activityLogs(): HasMany
+    {
+        return $this->hasMany(ActivityLog::class);
     }
 }
